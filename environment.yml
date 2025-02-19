@@ -1,0 +1,22 @@
+name: mt3-env
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.11 
+  - absl-py
+  - flax
+  - gin-config
+  - immutabledict
+  - librosa
+  - mir_eval
+  - note-seq
+  - numpy
+  - pretty_midi
+  - scikit-learn
+  - scipy
+  - seqio
+  - t5
+  - t5x
+  - tensorflow
+  - tensorflow-datasets
