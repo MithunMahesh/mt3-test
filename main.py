@@ -169,19 +169,19 @@ class InferenceModel(object):
             ds = pp(ds)
         return ds
 
-    def transcribe_and_save(input_file, output_file, model_type="mt3"):
-        """Transcribe an audio file and save as MIDI."""
-        print(f"Transcribing {input_file} using model {model_type} and saving to {output_file}")
-        audio, _ = librosa.load(input_file, sr=SAMPLE_RATE)
-        model = InferenceModel(f'./checkpoints/{model_type}', model_type)
-        est_ns = model(audio)
-        note_seq.sequence_proto_to_midi_file(est_ns, output_file)
+def transcribe_and_save(input_file, output_file, model_type="mt3"):
+    """Transcribe an audio file and save as MIDI."""
+    print(f"Transcribing {input_file} using model {model_type} and saving to {output_file}")
+    audio, _ = librosa.load(input_file, sr=SAMPLE_RATE)
+    model = InferenceModel(f'./checkpoints/{model_type}', model_type)
+    est_ns = model(audio)
+    note_seq.sequence_proto_to_midi_file(est_ns, output_file)
 
-    if __name__ == "__main__":
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--input", required=True, help="Path to input WAV file")
-        parser.add_argument("--output", required=True, help="Path to output MIDI file")
-        parser.add_argument("--model", default="mt3", choices=["ismir2021", "mt3"], help="Model type")
-        args = parser.parse_args()
-    
-        transcribe_and_save(args.input, args.output, args.model)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", required=True, help="Path to input WAV file")
+    parser.add_argument("--output", required=True, help="Path to output MIDI file")
+    parser.add_argument("--model", default="mt3", choices=["ismir2021", "mt3"], help="Model type")
+    args = parser.parse_args()
+
+    transcribe_and_save(args.input, args.output, args.model)
