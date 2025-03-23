@@ -7,18 +7,21 @@ dependencies:
   - pip
   - numpy
   - scipy
-  - scikit-learn
-  - tensorflow
-  - tensorflow-datasets
-  - librosa
-  - mir_eval
-  - pretty_midi
-  - absl-py
-  - flax
-  - gin-config
-  - immutabledict
+  - ffmpeg
   - pip:
-      - note-seq
-      - seqio
-      - t5
-      - t5x
+    - "jax[cpu]==0.4.14"
+    - tensorflow==2.12.0
+    - tensorflow-datasets
+    - seqio==0.0.19
+    - clu==0.0.8
+    - flax==0.7.2
+    - gin-config
+    - librosa
+    - mir_eval
+    - pretty_midi
+    - absl-py
+    - immutabledict
+    - note-seq
+    - git+https://github.com/google-research/t5x.git
+    - t5
+    - git+https://github.com/magenta/mt3.git
