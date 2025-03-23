@@ -1,8 +1,28 @@
-import argparse
+# Copyright 2021 Google LLC. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+
+"""
+MT3 Audio Transcription Script for Local Execution on Gilbreth Cluster
+Adapted from Google's MT3 Colab notebook
+"""
+
 import os
+import argparse
+import functools
 import numpy as np
 import tensorflow.compat.v2 as tf
-import functools
 import gin
 import jax
 import librosa
@@ -19,15 +39,16 @@ from mt3 import preprocessors
 from mt3 import spectrograms
 from mt3 import vocabularies
 
-# Define constants
 SAMPLE_RATE = 16000
 SF2_PATH = 'SGM-v2.01-Sal-Guit-Bass-V1.3.sf2'
+
 
 class InferenceModel(object):
     """Wrapper of T5X model for music transcription."""
 
     def __init__(self, checkpoint_path, model_type='mt3'):
-        # Model Constants
+
+        # Model Constants.
         if model_type == 'ismir2021':
             num_velocity_bins = 127
             self.encoding_spec = note_sequences.NoteEncodingSpec
@@ -37,35 +58,43 @@ class InferenceModel(object):
             self.encoding_spec = note_sequences.NoteEncodingWithTiesSpec
             self.inputs_length = 256
         else:
-            raise ValueError(f'Unknown model_type: {model_type}')
+            raise ValueError('unknown model_type: %s' % model_type)
 
-        gin_files = [
-            f'./mt3/gin/model.gin',
-            f'./mt3/gin/{model_type}.gin'
-        ]
+        gin_files = [os.path.join(os.path.dirname(checkpoint_path), 'content/model.gin'),
+                    os.path.join(os.path.dirname(checkpoint_path), f'gin/mt3.gin')]
 
         self.batch_size = 8
         self.outputs_length = 1024
-        self.sequence_length = {'inputs': self.inputs_length, 'targets': self.outputs_length}
+        self.sequence_length = {'inputs': self.inputs_length,
+                                'targets': self.outputs_length}
 
-        self.partitioner = t5x.partitioning.PjitPartitioner(num_partitions=1)
+        self.partitioner = t5x.partitioning.PjitPartitioner(
+            num_partitions=1)
 
-        # Build Codecs and Vocabularies
+        # Build Codecs and Vocabularies.
         self.spectrogram_config = spectrograms.SpectrogramConfig()
         self.codec = vocabularies.build_codec(
-            vocab_config=vocabularies.VocabularyConfig(num_velocity_bins=num_velocity_bins))
+            vocab_config=vocabularies.VocabularyConfig(
+                num_velocity_bins=num_velocity_bins))
         self.vocabulary = vocabularies.vocabulary_from_codec(self.codec)
         self.output_features = {
             'inputs': seqio.ContinuousFeature(dtype=tf.float32, rank=2),
             'targets': seqio.Feature(vocabulary=self.vocabulary),
         }
 
-        # Load model
+        # Create a T5X model.
         self._parse_gin(gin_files)
         self.model = self._load_model()
 
-        # Restore from checkpoint
+        # Restore from checkpoint.
         self.restore_from_checkpoint(checkpoint_path)
+
+    @property
+    def input_shapes(self):
+        return {
+              'encoder_input_tokens': (self.batch_size, self.inputs_length),
+              'decoder_input_tokens': (self.batch_size, self.outputs_length)
+        }
 
     def _parse_gin(self, gin_files):
         """Parse gin files used to train the model."""
@@ -76,7 +105,8 @@ class InferenceModel(object):
             'vocabularies.VocabularyConfig.num_velocity_bins=%NUM_VELOCITY_BINS'
         ]
         with gin.unlock_config():
-            gin.parse_config_files_and_bindings(gin_files, gin_bindings, finalize_config=False)
+            gin.parse_config_files_and_bindings(
+                gin_files, gin_bindings, finalize_config=False)
 
     def _load_model(self):
         """Load up a T5X `Model` after parsing training gin config."""
@@ -92,10 +122,10 @@ class InferenceModel(object):
     def restore_from_checkpoint(self, checkpoint_path):
         """Restore training state from checkpoint, resets self._predict_fn()."""
         train_state_initializer = t5x.utils.TrainStateInitializer(
-            optimizer_def=self.model.optimizer_def,
-            init_fn=self.model.get_initial_variables,
-            input_shapes=self.input_shapes,
-            partitioner=self.partitioner)
+          optimizer_def=self.model.optimizer_def,
+          init_fn=self.model.get_initial_variables,
+          input_shapes=self.input_shapes,
+          partitioner=self.partitioner)
 
         restore_checkpoint_cfg = t5x.utils.RestoreCheckpointConfig(
             path=checkpoint_path, mode='specific', dtype='float32')
@@ -105,14 +135,17 @@ class InferenceModel(object):
         self._train_state = train_state_initializer.from_checkpoint_or_scratch(
             [restore_checkpoint_cfg], init_rng=jax.random.PRNGKey(0))
 
+    @functools.lru_cache()
     def _get_predict_fn(self, train_state_axes):
         """Generate a partitioned prediction function for decoding."""
         def partial_predict_fn(params, batch, decode_rng):
-            return self.model.predict_batch_with_aux(
-                params, batch, decoder_params={'decode_rng': None})
+          return self.model.predict_batch_with_aux(
+              params, batch, decoder_params={'decode_rng': None})
         return self.partitioner.partition(
             partial_predict_fn,
-            in_axis_resources=(train_state_axes.params, t5x.partitioning.PartitionSpec('data',), None),
+            in_axis_resources=(
+                train_state_axes.params,
+                t5x.partitioning.PartitionSpec('data',), None),
             out_axis_resources=t5x.partitioning.PartitionSpec('data',)
         )
 
@@ -123,7 +156,14 @@ class InferenceModel(object):
         return self.vocabulary.decode_tf(prediction).numpy()
 
     def __call__(self, audio):
-        """Infer note sequence from audio samples."""
+        """Infer note sequence from audio samples.
+
+        Args:
+          audio: 1-d numpy array of audio samples (16kHz) for a single example.
+
+        Returns:
+          A note_sequence of the transcribed audio.
+        """
         ds = self.audio_to_dataset(audio)
         ds = self.preprocess(ds)
 
@@ -136,7 +176,7 @@ class InferenceModel(object):
 
         predictions = []
         for example, tokens in zip(ds.as_numpy_iterator(), inferences):
-            predictions.append(self.postprocess(tokens, example))
+          predictions.append(self.postprocess(tokens, example))
 
         result = metrics_utils.event_predictions_to_ns(
             predictions, codec=self.codec, encoding_spec=self.encoding_spec)
@@ -145,7 +185,10 @@ class InferenceModel(object):
     def audio_to_dataset(self, audio):
         """Create a TF Dataset of spectrograms from input audio."""
         frames, frame_times = self._audio_to_frames(audio)
-        return tf.data.Dataset.from_tensors({'inputs': frames, 'input_times': frame_times})
+        return tf.data.Dataset.from_tensors({
+            'inputs': frames,
+            'input_times': frame_times,
+        })
 
     def _audio_to_frames(self, audio):
         """Compute spectrogram frames from audio."""
@@ -153,35 +196,102 @@ class InferenceModel(object):
         padding = [0, frame_size - len(audio) % frame_size]
         audio = np.pad(audio, padding, mode='constant')
         frames = spectrograms.split_audio(audio, self.spectrogram_config)
-        return frames, np.arange(len(audio) // frame_size) / self.spectrogram_config.frames_per_second
+        num_frames = len(audio) // frame_size
+        times = np.arange(num_frames) / self.spectrogram_config.frames_per_second
+        return frames, times
 
     def preprocess(self, ds):
-        """Preprocess input dataset."""
-        for pp in [
-            functools.partial(t5.data.preprocessors.split_tokens_to_inputs_length,
-                              sequence_length=self.sequence_length,
-                              output_features=self.output_features,
-                              feature_key='inputs',
-                              additional_feature_keys=['input_times']),
+        pp_chain = [
+            functools.partial(
+                t5.data.preprocessors.split_tokens_to_inputs_length,
+                sequence_length=self.sequence_length,
+                output_features=self.output_features,
+                feature_key='inputs',
+                additional_feature_keys=['input_times']),
+            # Cache occurs here during training.
             preprocessors.add_dummy_targets,
-            functools.partial(preprocessors.compute_spectrograms, spectrogram_config=self.spectrogram_config)
-        ]:
-            ds = pp(ds)
+            functools.partial(
+                preprocessors.compute_spectrograms,
+                spectrogram_config=self.spectrogram_config)
+        ]
+        for pp in pp_chain:
+          ds = pp(ds)
         return ds
 
-def transcribe_and_save(input_file, output_file, model_type="mt3"):
-    """Transcribe an audio file and save as MIDI."""
-    print(f"Transcribing {input_file} using model {model_type} and saving to {output_file}")
-    audio, _ = librosa.load(input_file, sr=SAMPLE_RATE)
-    model = InferenceModel(f'./checkpoints/{model_type}', model_type)
-    est_ns = model(audio)
-    note_seq.sequence_proto_to_midi_file(est_ns, output_file)
+    def postprocess(self, tokens, example):
+        tokens = self._trim_eos(tokens)
+        start_time = example['input_times'][0]
+        # Round down to nearest symbolic token step.
+        start_time -= start_time % (1 / self.codec.steps_per_second)
+        return {
+            'est_tokens': tokens,
+            'start_time': start_time,
+            # Internal MT3 code expects raw inputs, not used here.
+            'raw_inputs': []
+        }
+
+    @staticmethod
+    def _trim_eos(tokens):
+        tokens = np.array(tokens, np.int32)
+        if vocabularies.DECODED_EOS_ID in tokens:
+          tokens = tokens[:np.argmax(tokens == vocabularies.DECODED_EOS_ID)]
+        return tokens
+
+
+def load_audio_file(file_path, sample_rate=SAMPLE_RATE):
+    """Load audio file using librosa."""
+    print(f"Loading audio file: {file_path}")
+    y, sr = librosa.load(file_path, sr=sample_rate)
+    return y
+
+
+def transcribe_audio(audio_path, model_type, checkpoint_path, output_midi_path):
+    """Transcribe audio file to MIDI."""
+    # Load the model
+    print(f"Loading {model_type} model from checkpoint: {checkpoint_path}")
+    inference_model = InferenceModel(checkpoint_path, model_type)
+    
+    # Load audio
+    audio = load_audio_file(audio_path)
+    
+    # Transcribe
+    print("Transcribing audio... (this may take a few minutes)")
+    est_ns = inference_model(audio)
+    
+    # Save MIDI file
+    print(f"Saving transcription to: {output_midi_path}")
+    note_seq.sequence_proto_to_midi_file(est_ns, output_midi_path)
+    
+    # Statistics
+    num_notes = sum(1 for note in est_ns.notes if not note.is_drum)
+    num_drum_notes = sum(1 for note in est_ns.notes if note.is_drum)
+    num_programs = len(set(note.program for note in est_ns.notes if not note.is_drum))
+    
+    print(f"Transcription complete.")
+    print(f"Number of notes: {num_notes}")
+    print(f"Number of drum notes: {num_drum_notes}")
+    print(f"Number of unique programs/instruments: {num_programs}")
+    
+    return est_ns
+
+
+def main():
+    parser = argparse.ArgumentParser(description='MT3 Audio Transcription')
+    parser.add_argument('--audio_path', required=True, help='Path to audio file to transcribe')
+    parser.add_argument('--model_type', default='mt3', choices=['ismir2021', 'mt3'],
+                        help='Model type: "ismir2021" for piano only with velocities, "mt3" for multi-instrument')
+    parser.add_argument('--checkpoint_path', required=True, help='Path to model checkpoint directory')
+    parser.add_argument('--output_midi', default='transcribed.mid', help='Output MIDI file path')
+    
+    args = parser.parse_args()
+    
+    transcribe_audio(
+        audio_path=args.audio_path,
+        model_type=args.model_type,
+        checkpoint_path=args.checkpoint_path,
+        output_midi_path=args.output_midi
+    )
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True, help="Path to input WAV file")
-    parser.add_argument("--output", required=True, help="Path to output MIDI file")
-    parser.add_argument("--model", default="mt3", choices=["ismir2021", "mt3"], help="Model type")
-    args = parser.parse_args()
-
-    transcribe_and_save(args.input, args.output, args.model)
+    main()
