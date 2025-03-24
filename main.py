@@ -1,23 +1,3 @@
-# Copyright 2021 Google LLC. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-
-"""
-MT3 Audio Transcription Script for Local Execution on Gilbreth Cluster
-Adapted from Google's MT3 Colab notebook
-"""
-
 import os
 import argparse
 import functools
@@ -44,11 +24,10 @@ SF2_PATH = 'SGM-v2.01-Sal-Guit-Bass-V1.3.sf2'
 
 
 class InferenceModel(object):
-    """Wrapper of T5X model for music transcription."""
 
     def __init__(self, checkpoint_path, model_type='mt3'):
 
-        # Model Constants.
+        # Model Constants
         if model_type == 'ismir2021':
             num_velocity_bins = 127
             self.encoding_spec = note_sequences.NoteEncodingSpec
@@ -73,7 +52,7 @@ class InferenceModel(object):
         self.partitioner = t5x.partitioning.PjitPartitioner(
             num_partitions=1)
 
-        # Build Codecs and Vocabularies.
+
         self.spectrogram_config = spectrograms.SpectrogramConfig()
         self.codec = vocabularies.build_codec(
             vocab_config=vocabularies.VocabularyConfig(
@@ -210,7 +189,6 @@ class InferenceModel(object):
                 output_features=self.output_features,
                 feature_key='inputs',
                 additional_feature_keys=['input_times']),
-            # Cache occurs here during training.
             preprocessors.add_dummy_targets,
             functools.partial(
                 preprocessors.compute_spectrograms,
