@@ -60,8 +60,10 @@ class InferenceModel(object):
         else:
             raise ValueError('unknown model_type: %s' % model_type)
 
-        gin_files = [os.path.join(os.path.dirname(checkpoint_path), 'content/model.gin'),
-                    os.path.join(os.path.dirname(checkpoint_path), f'gin/mt3.gin')]
+        gin_files = [
+                    './content/gin/model.gin',
+                    f'./content/gin/{model_type}.gin'
+        ]
 
         self.batch_size = 8
         self.outputs_length = 1024
